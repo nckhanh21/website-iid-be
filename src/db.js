@@ -262,6 +262,139 @@ if (pubsNeedFiles.length) {
   migrateFiles()
 }
 
+// --- Press: migrate structured `quotes` into rich-text `content` -----------
+// Press articles are now authored with the rich editor. Fold any existing
+// quotes (text + source link) into `content` as blockquotes once, then clear
+// the quotes column so this only runs a single time.
+ensureColumn('press_articles', 'content', 'TEXT')
+
+function escPress(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+const pressToMigrate = db
+  .prepare(
+    `SELECT id, content, quotes FROM press_articles
+     WHERE (content IS NULL OR content = '') AND quotes IS NOT NULL AND quotes != '' AND quotes != '[]'`
+  )
+  .all()
+if (pressToMigrate.length) {
+  const updPress = db.prepare("UPDATE press_articles SET content = ?, quotes = '' WHERE id = ?")
+  const migratePress = db.transaction(() => {
+    for (const row of pressToMigrate) {
+      let quotes = []
+      try {
+        quotes = JSON.parse(row.quotes)
+      } catch {
+        quotes = []
+      }
+      if (!Array.isArray(quotes) || !quotes.length) continue
+      const html = quotes
+        .map((q) => {
+          const text = q?.text ? `&ldquo;${escPress(q.text)}&rdquo;` : ''
+          const cite =
+            q?.source && q?.url
+              ? ` — <a href="${escPress(q.url)}">${escPress(q.source)}</a>`
+              : q?.source
+                ? ` — ${escPress(q.source)}`
+                : ''
+          return `<blockquote><p>${text}${cite}</p></blockquote>`
+        })
+        .join('\n')
+      updPress.run(html, row.id)
+    }
+  })
+  migratePress()
+}
+
+// --- Programmes: migrate plain-text `detail` to rich-text HTML -------------
+/** Wrap plain text into <p> blocks (one per blank-line-separated chunk). */
+function plainTextToHtml(text) {
+  const esc = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return String(text)
+    .split(/\n{2,}/) // blank line separates paragraphs
+    .map((para) => para.trim())
+    .filter(Boolean)
+    .map((para) => `<p>${esc(para).replace(/\n/g, '<br>')}</p>`)
+    .join('\n')
+}
+
+// Rows whose `detail` is plain text (no HTML tags) get wrapped once. Rows that
+// already contain markup (e.g. created via the rich editor) are left untouched.
+const progsToMigrate = db
+  .prepare(
+    "SELECT id, detail FROM programmes WHERE detail IS NOT NULL AND detail != '' AND detail NOT LIKE '%<%>%'"
+  )
+  .all()
+if (progsToMigrate.length) {
+  const updDetail = db.prepare('UPDATE programmes SET detail = ? WHERE id = ?')
+  const migrateDetail = db.transaction(() => {
+    for (const row of progsToMigrate) {
+      const html = plainTextToHtml(row.detail)
+      if (html) updDetail.run(html, row.id)
+    }
+  })
+  migrateDetail()
+}
+
+// --- Programmes: fold list / note / outputs into the rich-text `detail` -----
+// These structured fields are now authored inline in `detail`. Move any
+// existing content into the detail HTML once, then clear the source columns so
+// this runs only once.
+const escHtml = (s) =>
+  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+function parseJsonArray(value) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const progsToFold = db
+  .prepare(
+    `SELECT id, detail, list_heading, list, note, outputs_heading, outputs
+     FROM programmes
+     WHERE (list IS NOT NULL AND list != '' AND list != '[]')
+        OR (note IS NOT NULL AND note != '')
+        OR (outputs IS NOT NULL AND outputs != '' AND outputs != '[]')`
+  )
+  .all()
+if (progsToFold.length) {
+  const updFold = db.prepare(
+    `UPDATE programmes
+     SET detail = ?, list_heading = '', list = '', note = '',
+         outputs_heading = '', outputs = ''
+     WHERE id = ?`
+  )
+  const foldAll = db.transaction(() => {
+    for (const row of progsToFold) {
+      const parts = []
+      const listItems = parseJsonArray(row.list)
+      if (listItems.length) {
+        if (row.list_heading) parts.push(`<h2>${escHtml(row.list_heading)}</h2>`)
+        parts.push('<ol>' + listItems.map((i) => `<li>${escHtml(i)}</li>`).join('') + '</ol>')
+      }
+      if (row.note && String(row.note).trim()) {
+        parts.push(`<blockquote>${escHtml(row.note)}</blockquote>`)
+      }
+      const outputItems = parseJsonArray(row.outputs)
+      if (outputItems.length) {
+        if (row.outputs_heading) parts.push(`<h2>${escHtml(row.outputs_heading)}</h2>`)
+        parts.push('<ul>' + outputItems.map((o) => `<li>${escHtml(o)}</li>`).join('') + '</ul>')
+      }
+      const appended = parts.join('\n')
+      const detail = [row.detail || '', appended].filter(Boolean).join('\n')
+      updFold.run(detail, row.id)
+    }
+  })
+  foldAll()
+}
+
 /**
  * Resource definitions consumed by the generic CRUD router.
  *
@@ -304,10 +437,12 @@ export const RESOURCES = {
       'intro', 'detail', 'list_heading', 'list', 'note',
       'outputs_heading', 'outputs', 'sort_order',
     ],
-    required: ['slug', 'title'],
+    required: ['title'],
     jsonColumns: ['list', 'outputs'],
     intColumns: ['banner_width', 'banner_height', 'image_width', 'image_height', 'sort_order'],
     orderBy: 'sort_order ASC, id ASC',
+    // slug is auto-generated from the title on create (see crudRouter).
+    autoSlug: { from: 'title' },
   },
   partners: {
     table: 'partners',
@@ -330,9 +465,9 @@ export const RESOURCES = {
   press: {
     table: 'press_articles',
     route: 'press',
-    columns: ['slug', 'title', 'image', 'image_alt', 'quotes', 'sort_order'],
+    columns: ['slug', 'title', 'image', 'image_alt', 'content', 'sort_order'],
     required: ['slug', 'title'],
-    jsonColumns: ['quotes'],
+    jsonColumns: [],
     intColumns: ['sort_order'],
     orderBy: 'sort_order ASC, id ASC',
   },
