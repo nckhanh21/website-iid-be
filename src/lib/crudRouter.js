@@ -25,6 +25,24 @@ export function createCrudRouter(resource) {
   const delStmt = db.prepare(`DELETE FROM ${table} WHERE id = ?`)
 
   // --- helpers ---------------------------------------------------------------
+  /**
+   * Build a URL-safe slug from arbitrary text: strip Vietnamese diacritics,
+   * lowercase, and collapse non-alphanumerics into single hyphens. A short
+   * base-36 timestamp suffix keeps slugs unique without a lookup.
+   */
+  function slugify(text) {
+    const base = String(text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // drop combining accents
+      .replace(/[đĐ]/g, 'd')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60)
+    const suffix = Date.now().toString(36).slice(-5)
+    return `${base || 'item'}-${suffix}`
+  }
+
   function coerce(col, value) {
     if (jsonColumns.includes(col)) {
       if (value == null) return null
@@ -64,6 +82,13 @@ export function createCrudRouter(resource) {
 
   router.post('/', requireAuth, (req, res) => {
     const body = req.body || {}
+
+    // Auto-generate the slug from a source field (e.g. title) on create, so
+    // admins never type one. Existing rows keep their slug (see PUT).
+    if (resource.autoSlug) {
+      body.slug = slugify(body[resource.autoSlug.from])
+    }
+
     const missing = validate(body, { partial: false })
     if (missing.length) {
       return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` })
@@ -90,6 +115,8 @@ export function createCrudRouter(resource) {
     if (!existing) return res.status(404).json({ error: 'Not found' })
 
     const body = req.body || {}
+    // Never let the auto-generated slug be overwritten on edit.
+    if (resource.autoSlug) delete body.slug
     const missing = validate(body, { partial: true })
     if (missing.length) {
       return res.status(400).json({ error: `Fields cannot be empty: ${missing.join(', ')}` })

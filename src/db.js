@@ -156,21 +156,110 @@ const associateCount = db
   .get().n
 if (associateCount === 0) {
   const insertAssociate = db.prepare(
-    "INSERT INTO leaders (name, role, type, sort_order) VALUES (?, ?, 'associate', ?)"
+    "INSERT INTO leaders (name, role, bio, type, sort_order) VALUES (?, ?, ?, 'associate', ?)"
   )
   const defaultAssociates = [
-    ['Le Thi Kim Cuc', 'M.Sc.'],
-    ['Luu Thu Giang', 'M.Sc.'],
-    ['Hoang Thi Thu Phuong', 'Ph.D.'],
-    ['Ngo Kim Tu', 'M.Sc.'],
-    ['Dinh Anh Tuan', 'Ph.D.'],
-    ['Duong Phuong Thao', 'M.Sc.'],
-    ['Le Thanh Huyen', 'M.Sc.'],
+    {
+      name: 'Le Thi Kim Cuc',
+      role: 'M.Sc.',
+      bio: "Lê Thị Kim Cúc is a Lecturer at Swinburne University of Technology and a recipient of the prestigious Australia Awards Scholarship (AAS). As a Research Associate at IID, she drives impactful insights as a core team member of Policy Research, the Working Paper Series (WPS), and MEL, while also serving as an advisor for the WPS, Policy, and MEL portfolios.",
+    },
+    {
+      name: 'Luu Thu Giang',
+      role: 'M.Sc.',
+      bio: "Lưu Thu Giang is a Lecturer at the Vietnam Women's Academy and an e-commerce consultant for numerous businesses. At IID, she serves as a Research Associate and the Supervisor for Rao thương. She focuses her core collaboration efforts on the Vietura and Hub Rừng projects, while providing advisory support for Rao thương, Vietura, and Hub rừng.",
+    },
+    {
+      name: 'Hoang Thi Thu Phuong',
+      role: 'Ph.D.',
+      bio: "Dr. Hoàng Thị Thu Phương is a University Lecturer at British University Vietnam (BUV) and a Research Associate at IID, where she leads the Policy Research division. She is a core member driving the Working Paper Series (WPS), ESG, and MEL teams, and serves as an advisor for the ESG and MEL portfolios.",
+    },
+    {
+      name: 'Ngo Kim Tu',
+      role: 'M.Sc.',
+      bio: "Ngô Kim Tú is a Lecturer at the University of Labour and Social Affairs and a Research Associate at IID, where she leads the ESG & Impact portfolio. She is a core member of the MEL (Monitoring, Evaluation, and Learning), Policy Research, and Mindlab teams. In her advisory capacity, she provides strategic insights across diverse initiatives, including Rao thương, imap, Mindlab, Hub rừng, Impactonomy, WPS, Policy, and MEL.",
+    },
+    {
+      name: 'Dinh Anh Tuan',
+      role: 'Ph.D.',
+      bio: "Dr. Đinh Anh Tuấn is a Research Associate at IID, serving as the Lead for the imap initiative. He plays a key role as a core team member in Impactonomy, Policy Research, and the Working Paper Series (WPS). He also lends his expertise as an advisor to imap, Hub rừng, Impactonomy, WPS, and Policy.",
+    },
+    {
+      name: 'Duong Phuong Thao',
+      role: 'M.Sc.',
+      bio: "Dương Phương Thảo is a Research Associate at IID and serves as the Supervisor for Vietura. Her core research and operational focus centers on Rao thương, Hub Rừng, and Mindlab. Additionally, she acts as a strategic advisor for several of IID's prominent programs, including Rao thương, Vietura, Mindlab, Hub rừng, Policy, and MEL.",
+    },
+    {
+      name: 'Le Thanh Huyen',
+      role: 'M.Sc.',
+      bio: "Lê Thanh Huyền is a financial consultant for major enterprises and a Research Associate at IID, where she serves as the Lead for Mindlab. She contributes her specialized corporate and financial expertise as an advisor across multiple key pillars, including Rao thương, imap, Hub rừng, Impactonomy, and ESG.",
+    },
   ]
   const seedAssociates = db.transaction(() => {
-    defaultAssociates.forEach(([name, role], i) => insertAssociate.run(name, role, i))
+    defaultAssociates.forEach(({ name, role, bio }, i) =>
+      insertAssociate.run(name, role, bio, i)
+    )
   })
   seedAssociates()
+}
+
+// --- Publications: migrate to rich-text content + uploaded PDF -------------
+ensureColumn('publications', 'content', 'TEXT')
+ensureColumn('publications', 'pdf_url', 'TEXT')
+
+/** Convert legacy publication `blocks` JSON into simple HTML for the editor. */
+function blocksToHtml(blocks) {
+  if (!Array.isArray(blocks)) return ''
+  const esc = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const parts = []
+  for (const b of blocks) {
+    if (b?.heading) parts.push(`<h2>${esc(b.heading)}</h2>`)
+    if (b?.subheading) parts.push(`<h3>${esc(b.subheading)}</h3>`)
+    for (const p of b?.paragraphs || []) parts.push(`<p>${esc(p)}</p>`)
+    if ((b?.items || []).length) {
+      parts.push('<ul>' + b.items.map((i) => `<li>${esc(i)}</li>`).join('') + '</ul>')
+    }
+  }
+  return parts.join('\n')
+}
+
+// One-time backfill: build `content` from `blocks` for rows not yet migrated.
+const pubsToMigrate = db
+  .prepare(
+    "SELECT id, blocks FROM publications WHERE (content IS NULL OR content = '') AND blocks IS NOT NULL AND blocks != ''"
+  )
+  .all()
+if (pubsToMigrate.length) {
+  const updateContent = db.prepare('UPDATE publications SET content = ? WHERE id = ?')
+  const migrate = db.transaction(() => {
+    for (const row of pubsToMigrate) {
+      try {
+        const html = blocksToHtml(JSON.parse(row.blocks))
+        if (html) updateContent.run(html, row.id)
+      } catch {
+        /* skip malformed blocks */
+      }
+    }
+  })
+  migrate()
+}
+
+// Multi-file downloads (up to 3) — backfill the single pdf_url into `files`.
+ensureColumn('publications', 'files', 'TEXT')
+const pubsNeedFiles = db
+  .prepare(
+    "SELECT id, pdf_url FROM publications WHERE (files IS NULL OR files = '') AND pdf_url IS NOT NULL AND pdf_url != ''"
+  )
+  .all()
+if (pubsNeedFiles.length) {
+  const updFiles = db.prepare('UPDATE publications SET files = ? WHERE id = ?')
+  const migrateFiles = db.transaction(() => {
+    for (const row of pubsNeedFiles) {
+      updFiles.run(JSON.stringify([{ url: row.pdf_url, name: 'Tải tài liệu (PDF)' }]), row.id)
+    }
+  })
+  migrateFiles()
 }
 
 /**
@@ -197,15 +286,13 @@ export const RESOURCES = {
   publications: {
     table: 'publications',
     route: 'publications',
-    columns: [
-      'slug', 'overline', 'title', 'subtitle', 'image',
-      'image_width', 'image_height', 'image_alt', 'body',
-      'links', 'blocks', 'sort_order',
-    ],
-    required: ['slug', 'title'],
-    jsonColumns: ['links', 'blocks'],
-    intColumns: ['image_width', 'image_height', 'sort_order'],
+    columns: ['slug', 'overline', 'title', 'body', 'image', 'content', 'files', 'sort_order'],
+    required: ['title'],
+    jsonColumns: ['files'],
+    intColumns: ['sort_order'],
     orderBy: 'sort_order ASC, id ASC',
+    // slug is auto-generated from the title on create (see crudRouter).
+    autoSlug: { from: 'title' },
   },
   programmes: {
     table: 'programmes',

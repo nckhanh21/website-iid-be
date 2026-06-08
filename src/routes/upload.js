@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url'
 import { requireAuth } from '../middleware/auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads')
+// Save into the project-root /uploads folder — the same directory index.js
+// serves statically at /uploads. (This file lives in src/routes, so go up two
+// levels.) Keeping these in sync is what makes the returned URL resolvable.
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 
 const storage = multer.diskStorage({
@@ -42,6 +45,16 @@ const upload = multer({
   },
 })
 
+// Separate uploader for PDF documents (publications), capped at 20 MB.
+const uploadPdf = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') return cb(null, true)
+    cb(new Error('Chỉ chấp nhận tệp PDF'))
+  },
+})
+
 const router = Router()
 
 router.post('/', requireAuth, (req, res) => {
@@ -49,6 +62,14 @@ router.post('/', requireAuth, (req, res) => {
     if (err) return res.status(400).json({ error: err.message })
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
     res.status(201).json({ url: `/uploads/${req.file.filename}` })
+  })
+})
+
+router.post('/pdf', requireAuth, (req, res) => {
+  uploadPdf.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message })
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+    res.status(201).json({ url: `/uploads/${req.file.filename}`, name: req.file.originalname })
   })
 })
 
