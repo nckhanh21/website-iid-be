@@ -117,10 +117,13 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT,
     when_text TEXT NOT NULL,
     title TEXT NOT NULL,
     body TEXT,
     image TEXT,
+    image_alt TEXT,
+    content TEXT,
     active INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -395,6 +398,41 @@ if (progsToFold.length) {
   foldAll()
 }
 
+// --- Events: add detail-page columns + backfill slugs -----------------------
+// Events now have their own detail page (like press articles), so they need a
+// slug, an image alt, and rich-text content. Add the columns on existing DBs
+// and generate a slug for any row missing one.
+ensureColumn('events', 'slug', 'TEXT')
+ensureColumn('events', 'image_alt', 'TEXT')
+ensureColumn('events', 'content', 'TEXT')
+
+/** Build a URL-safe slug from text (strips Vietnamese diacritics). */
+function slugifyEvent(text, id) {
+  const base = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+  return `${base || 'event'}-${id}`
+}
+
+const eventsNeedSlug = db
+  .prepare("SELECT id, title FROM events WHERE slug IS NULL OR slug = ''")
+  .all()
+if (eventsNeedSlug.length) {
+  const updSlug = db.prepare('UPDATE events SET slug = ? WHERE id = ?')
+  const backfillSlugs = db.transaction(() => {
+    for (const row of eventsNeedSlug) {
+      updSlug.run(slugifyEvent(row.title, row.id), row.id)
+    }
+  })
+  backfillSlugs()
+}
+
+
 /**
  * Resource definitions consumed by the generic CRUD router.
  *
@@ -474,11 +512,13 @@ export const RESOURCES = {
   events: {
     table: 'events',
     route: 'events',
-    columns: ['when_text', 'title', 'body', 'image', 'active', 'sort_order'],
+    columns: ['slug', 'when_text', 'title', 'body', 'image', 'image_alt', 'content', 'active', 'sort_order'],
     required: ['when_text', 'title'],
     jsonColumns: [],
     intColumns: ['active', 'sort_order'],
     orderBy: 'sort_order ASC, id ASC',
+    // slug is auto-generated from the title on create (see crudRouter).
+    autoSlug: { from: 'title' },
   },
 }
 
