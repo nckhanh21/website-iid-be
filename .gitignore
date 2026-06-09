@@ -1,8 +1,8 @@
 node_modules/
 .env
-data.db
-data.db-shm
-data.db-wal
+# data.db
+# data.db-shm
+# data.db-wal
 
 # Keep the uploads/ folder in git (via .gitkeep) but never commit uploaded images.
 # /uploads/*
