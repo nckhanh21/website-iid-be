@@ -21,7 +21,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = Number(process.env.PORT) || 3001
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || true }))
+// CORS_ORIGIN may be a comma-separated list (e.g. "http://localhost:5174,https://new-iid.iid.org.vn").
+// Split it into an array so the `cors` package reflects only the matching origin
+// per request — passing the raw comma-joined string would emit an invalid
+// multi-value Access-Control-Allow-Origin header that browsers reject.
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : true
+app.use(cors({ origin: corsOrigin }))
 app.use(express.json({ limit: '2mb' }))
 
 // Admin-uploaded images.
