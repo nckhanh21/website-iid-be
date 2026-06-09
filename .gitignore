@@ -5,7 +5,7 @@ data.db-shm
 data.db-wal
 
 # Keep the uploads/ folder in git (via .gitkeep) but never commit uploaded images.
-/uploads/*
-!/uploads/.gitkeep
+# /uploads/*
+# !/uploads/.gitkeep
 
 inspect-db.cjs
