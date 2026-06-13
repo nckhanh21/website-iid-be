@@ -71,7 +71,22 @@ db.exec(`
     image_height INTEGER,
     image_alt TEXT,
     intro TEXT,
+    purpose_image TEXT,
+    purpose_image_alt TEXT,
+    purpose TEXT,
+    benefits TEXT,
+    join_title TEXT,
+    join_image TEXT,
+    join_image_alt TEXT,
+    join_button_text TEXT,
+    join_button_link TEXT,
     detail TEXT,
+    schedule_image TEXT,
+    schedule_image_alt TEXT,
+    partners_title TEXT,
+    programme_partners TEXT,
+    support_title TEXT,
+    support_content TEXT,
     list_heading TEXT,
     list TEXT,
     note TEXT,
@@ -311,6 +326,22 @@ if (pressToMigrate.length) {
 }
 
 // --- Programmes: migrate plain-text `detail` to rich-text HTML -------------
+ensureColumn('programmes', 'purpose', 'TEXT')
+ensureColumn('programmes', 'purpose_image', 'TEXT')
+ensureColumn('programmes', 'purpose_image_alt', 'TEXT')
+ensureColumn('programmes', 'benefits', 'TEXT')
+ensureColumn('programmes', 'join_title', 'TEXT')
+ensureColumn('programmes', 'join_image', 'TEXT')
+ensureColumn('programmes', 'join_image_alt', 'TEXT')
+ensureColumn('programmes', 'join_button_text', 'TEXT')
+ensureColumn('programmes', 'join_button_link', 'TEXT')
+ensureColumn('programmes', 'schedule_image', 'TEXT')
+ensureColumn('programmes', 'schedule_image_alt', 'TEXT')
+ensureColumn('programmes', 'partners_title', 'TEXT')
+ensureColumn('programmes', 'programme_partners', 'TEXT')
+ensureColumn('programmes', 'support_title', 'TEXT')
+ensureColumn('programmes', 'support_content', 'TEXT')
+
 /** Wrap plain text into <p> blocks (one per blank-line-separated chunk). */
 function plainTextToHtml(text) {
   const esc = (s) =>
@@ -472,11 +503,15 @@ export const RESOURCES = {
       'slug', 'overline', 'title', 'subtitle',
       'banner', 'banner_width', 'banner_height', 'banner_alt',
       'image', 'image_width', 'image_height', 'image_alt',
-      'intro', 'detail', 'list_heading', 'list', 'note',
+      'intro', 'purpose_image', 'purpose_image_alt', 'purpose', 'benefits',
+      'join_title', 'join_image', 'join_image_alt', 'join_button_text', 'join_button_link',
+      'detail', 'schedule_image', 'schedule_image_alt',
+      'partners_title', 'programme_partners', 'support_title', 'support_content',
+      'list_heading', 'list', 'note',
       'outputs_heading', 'outputs', 'sort_order',
     ],
     required: ['title'],
-    jsonColumns: ['list', 'outputs'],
+    jsonColumns: ['benefits', 'programme_partners', 'list', 'outputs'],
     intColumns: ['banner_width', 'banner_height', 'image_width', 'image_height', 'sort_order'],
     orderBy: 'sort_order ASC, id ASC',
     // slug is auto-generated from the title on create (see crudRouter).

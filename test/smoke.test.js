@@ -91,14 +91,58 @@ test('JSON column round-trips on a publication', async () => {
     body: JSON.stringify({
       slug,
       title: 'Smoke Pub',
-      links: [{ label: 'PDF', href: '#', icon: 'picture_as_pdf' }],
+      files: [{ url: '/uploads/smoke.pdf', name: 'Smoke PDF' }],
     }),
   })
   assert.equal(c.status, 201)
   const created = await c.json()
-  assert.ok(Array.isArray(created.links))
-  assert.equal(created.links[0].label, 'PDF')
+  assert.ok(Array.isArray(created.files))
+  assert.equal(created.files[0].name, 'Smoke PDF')
   await fetch(`${BASE}/api/publications/${created.id}`, { method: 'DELETE', headers: auth })
+})
+
+test('programme detail fields round-trip', async () => {
+  const auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  const c = await fetch(`${BASE}/api/programmes`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      title: `Smoke Programme ${Date.now()}`,
+      overline: 'June 2026 - November 2026',
+      intro: 'Programme intro',
+      purpose_image: '/uploads/purpose.png',
+      purpose_image_alt: 'Purpose image',
+      purpose: 'Programme purpose',
+      benefits: [{ icon: 'emoji_events', title: 'Top cases', description: 'Published' }],
+      join_title: 'Join now',
+      join_image: '/uploads/join.png',
+      join_image_alt: 'Join image',
+      join_button_text: 'Register',
+      join_button_link: 'https://example.com/register',
+      detail: '<p>Rich content</p>',
+      schedule_image: '/uploads/schedule.png',
+      schedule_image_alt: 'Schedule image',
+      partners_title: 'Partners',
+      programme_partners: [{ name: 'IID', logo: '/uploads/iid.png', link: 'https://iid.org.vn' }],
+      support_title: 'Support',
+      support_content: '<p>Email: hello@iid.org.vn</p>',
+    }),
+  })
+  assert.equal(c.status, 201)
+  const created = await c.json()
+  assert.ok(created.slug)
+  assert.ok(Array.isArray(created.benefits))
+  assert.equal(created.benefits[0].title, 'Top cases')
+  assert.equal(created.purpose_image, '/uploads/purpose.png')
+  assert.equal(created.join_title, 'Join now')
+  assert.equal(created.join_image, '/uploads/join.png')
+  assert.equal(created.schedule_image, '/uploads/schedule.png')
+  assert.equal(created.partners_title, 'Partners')
+  assert.ok(Array.isArray(created.programme_partners))
+  assert.equal(created.programme_partners[0].logo, '/uploads/iid.png')
+  assert.equal(created.support_content, '<p>Email: hello@iid.org.vn</p>')
+
+  await fetch(`${BASE}/api/programmes/${created.id}`, { method: 'DELETE', headers: auth })
 })
 
 test('newsletter subscribe is public and idempotent', async () => {
